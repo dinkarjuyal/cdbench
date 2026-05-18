@@ -191,7 +191,8 @@ corruption $c$ is present.
 A second LLM scores each verified mutation on non-triviality (1--5). Mutations
 scoring ${\leq}2$ (immediate syntax errors, trivially obvious type mismatches,
 signature-level detection) are rejected. Mutations scoring ${\geq}3$ enter the
-catalog.
+catalog. Appendix~\ref{app:examples} shows accepted and rejected examples with
+Guide scoring rationale.
 
 Applied to the scikit-learn library, the pipeline
 produces 173 candidates at a 65\% acceptance rate, yielding 139 healthy
@@ -547,5 +548,88 @@ for any library with a test suite.
 
 \bibliographystyle{unsrtnat}
 \bibliography{references}
+
+%% ─────────────────────────────────────────────────────────────
+\appendix
+
+\lstdefinestyle{diff}{
+  basicstyle=\ttfamily\small,
+  frame=single,
+  framerule=0.4pt,
+  xleftmargin=1.2em,
+  columns=fullflexible,
+  keepspaces=true,
+  moredelim=**[is][\color{red!70!black}]{<-}{->},
+  moredelim=**[is][\color{green!50!black}]{<+}{+>},
+}
+
+\section{Corruption Examples}
+\label{app:examples}
+
+The following examples are drawn from the CDBench catalog.  Each entry shows
+the source file path, the single-line diff applied by the Proposer, and a brief
+note on why the mutation is (or is not) non-trivial.  Examples A.1--A.2 passed
+both the Executor filter and Guide scoring ($\geq 3$); Example A.3 passed the
+Executor but was rejected by the Guide.
+
+%% ── A.1 ──────────────────────────────────────────────────────
+\subsection*{A.1\quad Operator Mutation — accepted (Guide score: 4)}
+
+\noindent\textbf{File:} \texttt{sklearn/linear\_model/\_logistic.py}
+
+\begin{lstlisting}[style=diff]
+  # convergence check
+<-  if n_iter_ >= max_iter:->
+<+  if n_iter_ > max_iter:+>
+      warnings.warn("lbfgs failed to converge", ConvergenceWarning)
+\end{lstlisting}
+
+The off-by-one shifts the convergence warning by exactly one iteration.  Tests
+that assert \texttt{ConvergenceWarning} is raised on tight iteration budgets
+now silently pass; fixing it requires tracing the solver loop rather than
+inspecting the warning call site.  Guide reasoning: \emph{``The mutated
+condition differs by a single character with identical control flow on all but
+the boundary case; a reader must check the loop counter semantics to identify
+the fault. Score: 4.''}
+
+%% ── A.2 ──────────────────────────────────────────────────────
+\subsection*{A.2\quad Membership Mutation — accepted (Guide score: 3)}
+
+\noindent\textbf{File:} \texttt{sklearn/ensemble/\_forest.py}
+
+\begin{lstlisting}[style=diff]
+  # validate max_features string argument
+<-  if self.max_features not in ("sqrt", "log2", "auto"):->
+<+  if self.max_features in ("sqrt", "log2", "auto"):+>
+      raise ValueError(
+          f"Invalid max_features: {self.max_features!r}")
+\end{lstlisting}
+
+Inverting the membership test causes validation to reject every valid string
+argument while silently accepting arbitrary invalid ones.  The symptom is a
+\texttt{ValueError} on correct calls rather than incorrect ones---misleading
+because the error message names a valid value.  Guide reasoning: \emph{``The
+logic inversion is confined to one line, but the symptom (valid input rejected,
+invalid input accepted) is non-obvious from the error message alone. Score:
+3.''}
+
+%% ── A.3 ──────────────────────────────────────────────────────
+\subsection*{A.3\quad Trivially Detectable Mutation — rejected (Guide score: 2)}
+
+\noindent\textbf{File:} \texttt{sklearn/utils/validation.py}
+
+\begin{lstlisting}[style=diff]
+  def check_is_fitted(estimator):
+<-      if estimator is None:->
+<+      if estimator is not None:+>
+          raise NotFittedError(
+              f"{type(estimator).__name__} is not fitted yet.")
+\end{lstlisting}
+
+This passed the Executor filter because every test that passes a valid fitted
+estimator now raises \texttt{NotFittedError}.  The Guide rejected it (score: 2)
+with the reasoning: \emph{``The inverted None check fires immediately on any
+valid estimator; a developer reading one line of context identifies the fault
+without executing the test suite.  Score: 2.''}
 
 \end{document}
